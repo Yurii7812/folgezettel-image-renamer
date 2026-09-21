@@ -1,6 +1,10 @@
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import tkinter as tk
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from PIL import Image
 
 from folgezettel_renamer import FolgezettelApp, ImageItem
@@ -20,7 +24,6 @@ with TemporaryDirectory() as td:
     app = FolgezettelApp(root)
     app.folder = folder
     app.items = [ImageItem(name, name) for name in ('scan1.jpg', 'scan2.jpg', 'scan3.jpg')]
-    app.auto_markdown_var.set(False)
     app.start_naming()
     root.update()
 

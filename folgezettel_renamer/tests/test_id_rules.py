@@ -1,3 +1,8 @@
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from folgezettel_renamer import child_id, increment_letters, next_sibling_id, normalize_id
 
 

@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+startup_error.log
+.folgezettel_project.json

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import sys
 import traceback
 import unicodedata
@@ -26,6 +27,7 @@ except ImportError:
 
 APP_TITLE = "Folgezettel画像リネーマー"
 PROJECT_FILE = ".folgezettel_project.json"
+SETTINGS_PATH = Path.home() / ".folgezettel_renamer_settings.json"
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
 ID_PATTERN = re.compile(r"^\d+(?:[a-z]+\d+)*[a-z]*$")
 INVALID_WINDOWS_CHARS = set('<>:"/\\|?*')
@@ -954,6 +956,20 @@ def restore_markdown_changes(folder: Path, changes: list[dict]) -> None:
                 pass
 
 
+def load_app_settings() -> dict:
+    try:
+        return json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_app_settings(data: dict) -> None:
+    try:
+        SETTINGS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
 @dataclass
 class ImageItem:
     original_name: str
@@ -1002,17 +1018,23 @@ class FolgezettelApp:
         self.other_preview_var = tk.StringVar(value="")
         self.other_mode_active = False
         self.other_mode_category = ""
-        self.auto_markdown_var = tk.BooleanVar(value=True)
 
         self.preview_image: Optional[ImageTk.PhotoImage] = None
         self.full_image: Optional[Image.Image] = None
         self.zoom = 1.0
         self.input_active = False
 
+        self.app_settings = load_app_settings()
+        self.last_main_folder: Optional[str] = self.app_settings.get("last_main_folder")
+
         self._build_setup_frame()
         self._build_naming_frame()
         self.show_setup()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        last_folder = self.app_settings.get("last_folder")
+        if last_folder and Path(last_folder).is_dir():
+            self.load_folder(Path(last_folder), ask_resume=False)
 
     # ---------- UI construction ----------
     def _build_setup_frame(self):
@@ -1026,11 +1048,11 @@ class FolgezettelApp:
         ttk.Label(top, text="ファイル名の接頭辞:").pack(side="left", padx=(22, 4))
         prefix_entry = ttk.Entry(top, textvariable=self.prefix_var, width=15)
         prefix_entry.pack(side="left")
-        ttk.Checkbutton(
-            top, text="Markdownを自動作成", variable=self.auto_markdown_var
-        ).pack(side="left", padx=(14, 0))
 
         ttk.Button(top, text="名前付けを開始", command=self.start_naming).pack(side="right")
+        ttk.Button(
+            top, text="本フォルダへ移動", command=self.move_to_main_folder
+        ).pack(side="right", padx=(0, 8))
         ttk.Button(top, text="Markdownを一括更新", command=self.update_markdown_existing).pack(
             side="right", padx=(0, 8)
         )
@@ -1187,6 +1209,8 @@ class FolgezettelApp:
         self.other_name_entry.bind("<KeyPress-O>", self.on_other_exit)
         self.other_category_entry.bind("<Escape>", self.cancel_input)
         self.other_name_entry.bind("<Escape>", self.cancel_input)
+        self.other_category_entry.bind("<Up>", self.recall_previous_other)
+        self.other_name_entry.bind("<Up>", self.recall_previous_other)
         self.other_category_var.trace_add("write", self.update_other_preview)
         self.other_name_var.trace_add("write", self.update_other_preview)
 
@@ -1196,7 +1220,8 @@ class FolgezettelApp:
 
         help_text = (
             "通常: → 連番  ↓ 子ID  ↑ 直前IDを編集  Space 空欄入力  "
-            "T トピック  I Index  o その他モード  O その他モード解除  ← 取り消し"
+            "T トピック  I Index  o その他モード（名前欄で↑=直前の名前を呼び出し）  "
+            "O その他モード解除  ← 取り消し"
         )
         self.naming_help = ttk.Label(self.naming_frame, text=help_text)
         self.naming_help.pack(anchor="center")
@@ -1210,17 +1235,22 @@ class FolgezettelApp:
             return
         self.load_folder(Path(selected))
 
-    def load_folder(self, folder: Path):
+    def load_folder(self, folder: Path, ask_resume: bool = True):
         self.folder = folder
         self.folder_var.set(str(folder))
         project_path = folder / PROJECT_FILE
 
+        self.app_settings["last_folder"] = str(folder)
+        save_app_settings(self.app_settings)
+
         loaded_project = False
         if project_path.exists():
-            use_project = messagebox.askyesno(
-                "前回の作業データ",
-                "このフォルダには前回の作業データがあります。再開しますか？\n\n「いいえ」を選ぶと現在のファイルから新しく一覧を作ります。",
-            )
+            use_project = True
+            if ask_resume:
+                use_project = messagebox.askyesno(
+                    "前回の作業データ",
+                    "このフォルダには前回の作業データがあります。再開しますか？\n\n「いいえ」を選ぶと現在のファイルから新しく一覧を作ります。",
+                )
             if use_project:
                 loaded_project = self.load_project(project_path)
 
@@ -1244,7 +1274,6 @@ class FolgezettelApp:
             "version": 5,
             "folder": str(self.folder),
             "prefix": self.prefix_var.get(),
-            "auto_markdown": self.auto_markdown_var.get(),
             "other_mode_active": self.other_mode_active,
             "other_mode_category": self.other_mode_category,
             "current_index": self.current_index,
@@ -1265,7 +1294,6 @@ class FolgezettelApp:
                 return False
             self.items = items
             self.prefix_var.set(data.get("prefix", "ZK_"))
-            self.auto_markdown_var.set(bool(data.get("auto_markdown", True)))
             self.other_mode_active = bool(data.get("other_mode_active", False))
             self.other_mode_category = str(data.get("other_mode_category", ""))
             self.current_index = int(data.get("current_index", 0))
@@ -1487,22 +1515,111 @@ class FolgezettelApp:
             f"変更なし: {result['unchanged']}",
         )
 
-    def sync_markdown_after_commit(self) -> list[dict]:
-        auto_var = getattr(self, "auto_markdown_var", None)
-        if not self.folder or auto_var is None or not auto_var.get():
-            return []
-        try:
-            changes, result = sync_markdown_folder(self.folder, self.prefix_var.get(), create_missing=True)
-            self.status_var.set(
-                f"Markdown: 新規{result['created']}、更新{result['updated']}"
-            )
-            return changes
-        except OSError as exc:
+    def move_to_main_folder(self):
+        if not self.folder:
+            messagebox.showwarning("フォルダがありません", "先に画像フォルダを選択してください。")
+            return
+        processed_indices = [i for i, item in enumerate(self.items) if item.processed]
+        if not processed_indices:
+            messagebox.showinfo("移動対象がありません", "名前付けが済んだ画像がありません。")
+            return
+
+        dialog_options = {"title": "移動先の本フォルダを選択"}
+        if self.last_main_folder and Path(self.last_main_folder).is_dir():
+            dialog_options["initialdir"] = self.last_main_folder
+        else:
+            dialog_options["initialdir"] = str(self.folder)
+        selected = filedialog.askdirectory(**dialog_options)
+        if not selected:
+            return
+        destination = Path(selected)
+        if destination.resolve() == self.folder.resolve():
+            messagebox.showwarning("移動できません", "移動先が現在のフォルダと同じです。")
+            return
+
+        if not messagebox.askyesno(
+            "本フォルダへ移動",
+            f"名前付け済みの{len(processed_indices)}枚を次のフォルダへ移動します。\n\n{destination}\n\nよろしいですか？",
+        ):
+            return
+
+        processed_set = set(processed_indices)
+        moved = 0
+        skipped: list[str] = []
+        remaining_items: list[ImageItem] = []
+        for i, item in enumerate(self.items):
+            if i not in processed_set:
+                remaining_items.append(item)
+                continue
+            src = item.current_path(self.folder)
+            dst = destination / item.current_name
+            if not src.exists() or dst.exists():
+                skipped.append(item.current_name)
+                remaining_items.append(item)
+                continue
+            try:
+                shutil.move(str(src), str(dst))
+            except OSError:
+                skipped.append(item.current_name)
+                remaining_items.append(item)
+                continue
+            src_md = src.with_suffix(".md")
+            if src_md.exists():
+                dst_md = dst.with_suffix(".md")
+                if not dst_md.exists():
+                    try:
+                        shutil.move(str(src_md), str(dst_md))
+                    except OSError:
+                        pass
+            moved += 1
+
+        self.items = remaining_items
+        self.current_index = self.first_unprocessed_index()
+        self.undo_stack.clear()
+
+        markdown_result = None
+        if moved:
+            prefix = self.prefix_var.get()
+            try:
+                _changes, markdown_result = sync_markdown_folder(destination, prefix, create_missing=True)
+            except OSError as exc:
+                messagebox.showwarning(
+                    "Markdownを作成できません",
+                    f"画像は移動しましたが、Markdown作成に失敗しました。\n\n{exc}",
+                )
+
+        self.last_main_folder = str(destination)
+        self.app_settings["last_main_folder"] = str(destination)
+        save_app_settings(self.app_settings)
+
+        if self.items:
+            self.save_project()
+        else:
+            project_path = self.project_path()
+            if project_path and project_path.exists():
+                try:
+                    project_path.unlink()
+                except OSError:
+                    pass
+
+        self.refresh_tree()
+        summary = f"{moved}枚を本フォルダへ移動しました"
+        if skipped:
+            summary += f"（{len(skipped)}枚は同名ファイルがあり移動できませんでした）"
+        self.status_var.set(summary)
+
+        if skipped:
             messagebox.showwarning(
-                "Markdownを作成できません",
-                f"画像のファイル名は変更しましたが、Markdown処理に失敗しました。\n\n{exc}",
+                "一部移動できませんでした",
+                "移動先に同名のファイルが既にあるため、次のファイルは移動されませんでした:\n\n"
+                + "\n".join(skipped),
             )
-            return []
+        elif markdown_result:
+            messagebox.showinfo(
+                "本フォルダへ移動しました",
+                f"移動: {moved}枚\nMarkdown新規作成: {markdown_result['created']}\n"
+                f"Markdown更新: {markdown_result['updated']}",
+            )
 
     # ---------- naming ----------
     def show_setup(self):
@@ -1566,6 +1683,27 @@ class FolgezettelApp:
             if self.items[i].processed and self.items[i].folgezettel_id:
                 return self.items[i].folgezettel_id
         return None
+
+    def previous_other_note(self) -> Optional[ImageItem]:
+        for i in range(self.current_index - 1, -1, -1):
+            item = self.items[i]
+            if item.processed and item.note_kind == "other":
+                return item
+        return None
+
+    def recall_previous_other(self, _event=None):
+        previous = self.previous_other_note()
+        if previous is None:
+            self.status_var.set("直前のその他ノートがありません")
+            return "break"
+        self.other_category_var.set(previous.other_category or "")
+        self.other_mode_category = previous.other_category or self.other_mode_category
+        self.other_name_var.set(previous.other_name or "")
+        self.other_name_entry.focus_set()
+        self.other_name_entry.selection_range(0, tk.END)
+        self.other_name_entry.icursor(tk.END)
+        self.status_var.set("直前のその他ノート名を呼び出しました。編集してEnterで確定します")
+        return "break"
 
     def load_current_image(self):
         if not self.folder:
@@ -1741,7 +1879,9 @@ class FolgezettelApp:
         self.other_frame.pack(before=self.naming_help, pady=(0, 8))
         if category:
             self.other_name_entry.focus_set()
-            self.status_var.set(f"その他モード「{category}」: 名前を入力してEnterで確定します")
+            self.status_var.set(
+                f"その他モード「{category}」: 名前を入力してEnterで確定（↑で直前の名前を呼び出し）"
+            )
         else:
             self.other_category_entry.focus_set()
             self.status_var.set("分類名を入力し、TabまたはEnterで名前欄へ移動します")
@@ -1910,7 +2050,6 @@ class FolgezettelApp:
             "new_id": folgezettel_id,
             "new_title": topic_title,
         }
-        record["markdown_changes"] = self.sync_markdown_after_commit()
         self.undo_stack.append(record)
         self.current_index += 1
         self.hide_input()

@@ -1,5 +1,9 @@
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from PIL import Image
 
 from folgezettel_renamer import sync_markdown_folder
