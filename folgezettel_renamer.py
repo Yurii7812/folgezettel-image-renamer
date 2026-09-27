@@ -1298,7 +1298,7 @@ class FolgezettelApp:
         ).pack(anchor="w", pady=(2, 0))
 
         main_card = ttk.Labelframe(
-            self.setup_frame, text=" 1. 本フォルダ（名前付け後の移動先） ", style="Card.TLabelframe", padding=12
+            self.setup_frame, text="本フォルダ（名前付け後の移動先）", style="Card.TLabelframe", padding=12
         )
         main_card.pack(fill="x")
 
@@ -1310,7 +1310,7 @@ class FolgezettelApp:
         ).pack(side="left", padx=10, fill="x", expand=True)
 
         folder_card = ttk.Labelframe(
-            self.setup_frame, text=" 2. 対象フォルダと接頭辞 ", style="Card.TLabelframe", padding=12
+            self.setup_frame, text="対象フォルダと接頭辞", style="Card.TLabelframe", padding=12
         )
         folder_card.pack(fill="x", pady=(10, 0))
 
@@ -1332,7 +1332,7 @@ class FolgezettelApp:
         self.recent_bar.pack(side="left", fill="x", expand=True)
 
         order_card = ttk.Labelframe(
-            self.setup_frame, text=" 3. 並び替えと順番の微調整 ", style="Card.TLabelframe", padding=12
+            self.setup_frame, text="並び替えと順番の微調整", style="Card.TLabelframe", padding=12
         )
         order_card.pack(fill="x", pady=(10, 0))
 
