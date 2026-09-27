@@ -1044,8 +1044,9 @@ def pick_directory(title: str, initialdir: Optional[str] = None) -> Optional[str
         if proc is not None:
             if proc.returncode == 0:
                 return proc.stdout.strip() or None
-            if proc.returncode == 1 and not proc.stderr.strip():
+            if proc.returncode == 1:
                 return None
+            # 想定外の終了コードのみ次の手段へ
 
     if shutil.which("zenity"):
         try:
@@ -1066,7 +1067,7 @@ def pick_directory(title: str, initialdir: Optional[str] = None) -> Optional[str
         if proc is not None:
             if proc.returncode == 0:
                 return proc.stdout.strip() or None
-            if proc.returncode in (1, 5) and not proc.stderr.strip():
+            if proc.returncode in (1, 5):
                 return None
 
     selected = filedialog.askdirectory(
@@ -1135,15 +1136,48 @@ class FolgezettelApp:
         self.app_settings = load_app_settings()
         self.last_main_folder: Optional[str] = self.app_settings.get("last_main_folder")
 
+        saved_prefix = self.app_settings.get("prefix")
+        if saved_prefix:
+            self.prefix_var.set(saved_prefix)
+        self.prefix_var.trace_add("write", self._on_prefix_change)
+
         self._setup_styles()
         self._build_setup_frame()
         self._build_naming_frame()
         self.show_setup()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self._refresh_recent_buttons()
 
         last_folder = self.app_settings.get("last_folder")
         if last_folder and Path(last_folder).is_dir():
             self.load_folder(Path(last_folder), ask_resume=False)
+
+    def _on_prefix_change(self, *_args):
+        self.app_settings["prefix"] = self.prefix_var.get()
+        save_app_settings(self.app_settings)
+
+    def _add_recent_folder(self, folder: Path):
+        target = str(folder)
+        recent = [p for p in self.app_settings.get("recent_folders", []) if p != target]
+        recent.insert(0, target)
+        self.app_settings["recent_folders"] = recent[:5]
+
+    def _refresh_recent_buttons(self):
+        if not hasattr(self, "recent_bar"):
+            return
+        for child in self.recent_bar.winfo_children():
+            child.destroy()
+        recent = [p for p in self.app_settings.get("recent_folders", []) if Path(p).is_dir()]
+        if not recent:
+            ttk.Label(self.recent_bar, text="（まだありません）", style="CardMuted.TLabel").pack(side="left")
+            return
+        for path in recent:
+            label = Path(path).name or path
+            ttk.Button(
+                self.recent_bar,
+                text=label,
+                command=lambda p=path: self.load_folder(Path(p)),
+            ).pack(side="left", padx=(0, 6))
 
     # ---------- UI construction ----------
     def _setup_styles(self):
@@ -1276,6 +1310,12 @@ class FolgezettelApp:
         prefix_entry = ttk.Entry(folder_row, textvariable=self.prefix_var, width=12, font=(self.mono_font, FONT_SIZES["body"]))
         prefix_entry.pack(side="left")
         ttk.Label(folder_row, text="（例: ZK_）", style="CardMuted.TLabel").pack(side="left", padx=(6, 0))
+
+        recent_row = ttk.Frame(folder_card, style="Card.TFrame")
+        recent_row.pack(fill="x", pady=(8, 0))
+        ttk.Label(recent_row, text="最近のフォルダ:", style="CardMuted.TLabel").pack(side="left")
+        self.recent_bar = ttk.Frame(recent_row, style="Card.TFrame")
+        self.recent_bar.pack(side="left", fill="x", expand=True)
 
         order_card = ttk.Labelframe(
             self.setup_frame, text=" 2. 並び替えと順番の微調整 ", style="Card.TLabelframe", padding=12
@@ -1527,7 +1567,9 @@ class FolgezettelApp:
         project_path = folder / PROJECT_FILE
 
         self.app_settings["last_folder"] = str(folder)
+        self._add_recent_folder(folder)
         save_app_settings(self.app_settings)
+        self._refresh_recent_buttons()
 
         loaded_project = False
         if project_path.exists():
