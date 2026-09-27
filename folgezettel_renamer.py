@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import traceback
 import unicodedata
@@ -1024,6 +1025,56 @@ def pick_font(widget: tk.Misc, candidates: tuple[str, ...], fallback: str) -> st
     return fallback
 
 
+def pick_directory(title: str, initialdir: Optional[str] = None) -> Optional[str]:
+    """デスクトップに合ったフォルダ選択ダイアログを開く。
+
+    KDE(kdialog) → GTK(zenity) → Tk標準 の順に利用できるものを探す。
+    """
+    initial = initialdir if initialdir and Path(initialdir).is_dir() else str(Path.home())
+
+    if shutil.which("kdialog"):
+        try:
+            proc = subprocess.run(
+                ["kdialog", "--title", title, "--getexistingdirectory", initial],
+                capture_output=True,
+                text=True,
+            )
+        except OSError:
+            proc = None
+        if proc is not None:
+            if proc.returncode == 0:
+                return proc.stdout.strip() or None
+            if proc.returncode == 1 and not proc.stderr.strip():
+                return None
+
+    if shutil.which("zenity"):
+        try:
+            proc = subprocess.run(
+                [
+                    "zenity",
+                    "--file-selection",
+                    "--directory",
+                    "--title",
+                    title,
+                    f"--filename={initial.rstrip('/')}/",
+                ],
+                capture_output=True,
+                text=True,
+            )
+        except OSError:
+            proc = None
+        if proc is not None:
+            if proc.returncode == 0:
+                return proc.stdout.strip() or None
+            if proc.returncode in (1, 5) and not proc.stderr.strip():
+                return None
+
+    selected = filedialog.askdirectory(
+        title=title, initialdir=initial if Path(initial).is_dir() else None
+    )
+    return selected or None
+
+
 @dataclass
 class ImageItem:
     original_name: str
@@ -1464,7 +1515,8 @@ class FolgezettelApp:
 
     # ---------- folder and project ----------
     def choose_folder(self):
-        selected = filedialog.askdirectory(title="画像フォルダを選択")
+        initial = self.app_settings.get("last_folder") or str(Path.home())
+        selected = pick_directory("画像フォルダを選択", initial)
         if not selected:
             return
         self.load_folder(Path(selected))
@@ -1721,10 +1773,8 @@ class FolgezettelApp:
 
     # ---------- Markdown ----------
     def update_markdown_existing(self):
-        dialog_options = {"title": "Markdownを更新するフォルダを選択"}
-        if self.folder:
-            dialog_options["initialdir"] = str(self.folder)
-        selected = filedialog.askdirectory(**dialog_options)
+        initial = str(self.folder) if self.folder else self.app_settings.get("last_folder")
+        selected = pick_directory("Markdownを更新するフォルダを選択", initial)
         if not selected:
             return
         target = Path(selected)
@@ -1759,12 +1809,10 @@ class FolgezettelApp:
             messagebox.showinfo("移動対象がありません", "名前付けが済んだ画像がありません。")
             return
 
-        dialog_options = {"title": "移動先の本フォルダを選択"}
-        if self.last_main_folder and Path(self.last_main_folder).is_dir():
-            dialog_options["initialdir"] = self.last_main_folder
-        else:
-            dialog_options["initialdir"] = str(self.folder)
-        selected = filedialog.askdirectory(**dialog_options)
+        initial = self.last_main_folder if (
+            self.last_main_folder and Path(self.last_main_folder).is_dir()
+        ) else str(self.folder)
+        selected = pick_directory("移動先の本フォルダを選択", initial)
         if not selected:
             return
         destination = Path(selected)
