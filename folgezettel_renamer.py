@@ -1104,6 +1104,7 @@ class FolgezettelApp:
         self.current_index = 0
         self.undo_stack: list[dict] = []
         self.drag_iid: Optional[str] = None
+        self.drag_moved = False
         self.thumbnail_refs: dict[str, ImageTk.PhotoImage] = {}
 
         self.prefix_var = tk.StringVar(value="ZK_")
@@ -1818,17 +1819,32 @@ class FolgezettelApp:
 
     def on_drag_start(self, event):
         self.drag_iid = self.tree.identify_row(event.y)
+        self.drag_moved = False
+        if self.drag_iid:
+            self.tree.configure(cursor="fleur")
 
     def on_drag_motion(self, event):
         if not self.drag_iid:
             return
         target = self.tree.identify_row(event.y)
-        if target and target != self.drag_iid:
-            target_index = self.tree.index(target)
+        if not target or target == self.drag_iid:
+            return
+        target_index = self.tree.index(target)
+        bbox = self.tree.bbox(target)
+        if bbox and event.y > bbox[1] + bbox[3] // 2:
+            target_index += 1
+        current = self.tree.index(self.drag_iid)
+        if target_index > current:
+            target_index -= 1
+        if target_index != current:
             self.tree.move(self.drag_iid, "", target_index)
+            self.drag_moved = True
 
     def on_drag_end(self, _event):
-        if not self.drag_iid:
+        moved_iid = self.drag_iid
+        self.drag_iid = None
+        self.tree.configure(cursor="")
+        if not moved_iid or not self.drag_moved:
             return
         old_items = self.items[:]
         new_items = []
@@ -1841,7 +1857,7 @@ class FolgezettelApp:
             self.items = new_items
             self.refresh_tree()
             self.save_project()
-        self.drag_iid = None
+        self.drag_moved = False
 
     # ---------- Markdown ----------
     def update_markdown_existing(self):
