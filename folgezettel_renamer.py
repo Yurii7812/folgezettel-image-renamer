@@ -1109,6 +1109,7 @@ class FolgezettelApp:
         self.prefix_var = tk.StringVar(value="ZK_")
         self.sort_var = tk.StringVar(value="ファイル名（自然順・昇順）")
         self.folder_var = tk.StringVar(value="フォルダ未選択")
+        self.main_folder_var = tk.StringVar(value="未設定")
         self.status_var = tk.StringVar(value="フォルダを選択してください")
         self.progress_var = tk.StringVar(value="")
         self.previous_id_var = tk.StringVar(value="なし")
@@ -1135,6 +1136,7 @@ class FolgezettelApp:
 
         self.app_settings = load_app_settings()
         self.last_main_folder: Optional[str] = self.app_settings.get("last_main_folder")
+        self.main_folder_var.set(self.last_main_folder or "未設定")
 
         saved_prefix = self.app_settings.get("prefix")
         if saved_prefix:
@@ -1295,10 +1297,22 @@ class FolgezettelApp:
             style="Subtitle.TLabel",
         ).pack(anchor="w", pady=(2, 0))
 
-        folder_card = ttk.Labelframe(
-            self.setup_frame, text=" 1. 対象フォルダと接頭辞 ", style="Card.TLabelframe", padding=12
+        main_card = ttk.Labelframe(
+            self.setup_frame, text=" 1. 本フォルダ（名前付け後の移動先） ", style="Card.TLabelframe", padding=12
         )
-        folder_card.pack(fill="x")
+        main_card.pack(fill="x")
+
+        main_row = ttk.Frame(main_card, style="Card.TFrame")
+        main_row.pack(fill="x")
+        ttk.Button(main_row, text="本フォルダを選択", command=self.choose_main_folder).pack(side="left")
+        ttk.Label(
+            main_row, textvariable=self.main_folder_var, style="CardMuted.TLabel"
+        ).pack(side="left", padx=10, fill="x", expand=True)
+
+        folder_card = ttk.Labelframe(
+            self.setup_frame, text=" 2. 対象フォルダと接頭辞 ", style="Card.TLabelframe", padding=12
+        )
+        folder_card.pack(fill="x", pady=(10, 0))
 
         folder_row = ttk.Frame(folder_card, style="Card.TFrame")
         folder_row.pack(fill="x")
@@ -1318,7 +1332,7 @@ class FolgezettelApp:
         self.recent_bar.pack(side="left", fill="x", expand=True)
 
         order_card = ttk.Labelframe(
-            self.setup_frame, text=" 2. 並び替えと順番の微調整 ", style="Card.TLabelframe", padding=12
+            self.setup_frame, text=" 3. 並び替えと順番の微調整 ", style="Card.TLabelframe", padding=12
         )
         order_card.pack(fill="x", pady=(10, 0))
 
@@ -1560,6 +1574,22 @@ class FolgezettelApp:
         if not selected:
             return
         self.load_folder(Path(selected))
+
+    def choose_main_folder(self):
+        initial = self.last_main_folder if (
+            self.last_main_folder and Path(self.last_main_folder).is_dir()
+        ) else (str(self.folder) if self.folder else str(Path.home()))
+        selected = pick_directory("本フォルダ（移動先）を選択", initial)
+        if not selected:
+            return
+        self.set_main_folder(Path(selected))
+
+    def set_main_folder(self, folder: Path):
+        self.last_main_folder = str(folder)
+        self.main_folder_var.set(str(folder))
+        self.app_settings["last_main_folder"] = str(folder)
+        save_app_settings(self.app_settings)
+        self.status_var.set(f"本フォルダを設定しました: {folder}")
 
     def load_folder(self, folder: Path, ask_resume: bool = True):
         self.folder = folder
@@ -1851,13 +1881,15 @@ class FolgezettelApp:
             messagebox.showinfo("移動対象がありません", "名前付けが済んだ画像がありません。")
             return
 
-        initial = self.last_main_folder if (
-            self.last_main_folder and Path(self.last_main_folder).is_dir()
-        ) else str(self.folder)
-        selected = pick_directory("移動先の本フォルダを選択", initial)
-        if not selected:
-            return
-        destination = Path(selected)
+        if self.last_main_folder and Path(self.last_main_folder).is_dir():
+            destination = Path(self.last_main_folder)
+        else:
+            initial = str(self.folder)
+            selected = pick_directory("移動先の本フォルダを選択", initial)
+            if not selected:
+                return
+            destination = Path(selected)
+            self.set_main_folder(destination)
         if destination.resolve() == self.folder.resolve():
             messagebox.showwarning("移動できません", "移動先が現在のフォルダと同じです。")
             return
